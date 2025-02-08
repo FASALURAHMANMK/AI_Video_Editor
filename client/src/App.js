@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import VideoSearchForm from './components/VideoSearchForm';
-import SnippetList from './components/SnippetList';
 import SnippetEditor from './components/SnippetEditor';
 import axios from 'axios';
 
@@ -153,9 +152,7 @@ function App() {
 
       {snippets.length > 0 && (
         <div className="card my-4 p-3">
-          <h3>Top Snippets</h3>
-          <SnippetList snippets={snippets} />
-          
+          <h3>Top Snippets</h3> 
           <button
             className="btn btn-secondary mt-3"
             onClick={handleRefineOrder}
