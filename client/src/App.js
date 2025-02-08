@@ -1,7 +1,11 @@
+// App.js (Updated with Professional UI)
 import React, { useState } from 'react';
 import VideoSearchForm from './components/VideoSearchForm';
 import SnippetEditor from './components/SnippetEditor';
 import axios from 'axios';
+import { ToastContainer, toast } from 'react-toastify'; // Adding Toasts for Feedback
+import 'react-toastify/dist/ReactToastify.css'; // Toast Styling
+import './App.css'; // Custom global styles
 
 function App() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
@@ -14,7 +18,6 @@ function App() {
   const [videoPath, setVideoPath] = useState(null);
   const [error, setError] = useState(null);
 
-  // 1) Fetch transcript chunks
   const handleFetchChunks = async (url) => {
     try {
       setYoutubeUrl(url);
@@ -24,23 +27,23 @@ function App() {
       setVideoPath(null);
       const response = await axios.post('http://localhost:5001/api/transcript-chunks', {
         youtubeUrl: url,
-        maxChunkSize: 200
+        maxChunkSize: 200,
       });
       if (response.data.error) {
         setError(response.data.error);
       } else {
         setChunks(response.data.chunks);
+        toast.success('Transcript chunks fetched successfully!');
       }
     } catch (err) {
+      toast.error('Failed to fetch transcript chunks.');
       console.error(err);
-      setError(err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // 2) Search for relevant snippets
-  const handleSearch = async (query, topK=5) => {
+  const handleSearch = async (query, topK = 5) => {
     if (!chunks.length) return;
     try {
       setSearchQuery(query);
@@ -51,23 +54,23 @@ function App() {
       const resp = await axios.post('http://localhost:5001/api/search-snippets', {
         chunks: chunks,
         query: query,
-        topK: topK
+        topK: topK,
       });
       if (resp.data.error) {
         setError(resp.data.error);
       } else {
         setSnippets(resp.data.results);
         setRefinedOrder([]);
+        toast.success('Top snippets found!');
       }
     } catch (err) {
+      toast.error('Snippet search failed.');
       console.error(err);
-      setError(err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // 3) Refine snippet order using LLM
   const handleRefineOrder = async () => {
     if (!snippets.length) return;
     try {
@@ -76,26 +79,24 @@ function App() {
 
       const resp = await axios.post('http://localhost:5001/api/refine-snippets', {
         snippets: snippets,
-        query: searchQuery
+        query: searchQuery,
       });
       if (resp.data.error) {
         setError(resp.data.error);
       } else {
         const newOrder = resp.data.order;
-        // rearrange the existing snippets array
-        const reordered = newOrder.map(idx => snippets[idx]).filter(Boolean);
+        const reordered = newOrder.map((idx) => snippets[idx]).filter(Boolean);
         setSnippets(reordered);
-        setRefinedOrder(newOrder);
+        toast.info('Snippets refined and reordered.');
       }
     } catch (err) {
+      toast.error('Refining order failed.');
       console.error(err);
-      setError(err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // 4) Create final highlight video
   const handleCreateVideo = async (finalSnippets) => {
     try {
       setLoading(true);
@@ -103,16 +104,17 @@ function App() {
       setVideoPath(null);
       const resp = await axios.post('http://localhost:5001/api/create-video', {
         youtubeUrl: youtubeUrl,
-        snippets: finalSnippets
+        snippets: finalSnippets,
       });
       if (resp.data.error) {
         setError(resp.data.error);
       } else {
         setVideoPath(resp.data.videoPath);
+        toast.success('Highlight video created!');
       }
     } catch (err) {
+      toast.error('Video creation failed.');
       console.error(err);
-      setError(err.response?.data?.error || err.message);
     } finally {
       setLoading(false);
     }
@@ -120,22 +122,23 @@ function App() {
 
   return (
     <div className="container my-4">
-      <h1 className="mb-3">AI Video Editor</h1>
+      <ToastContainer position="top-right" autoClose={3000} hideProgressBar={false} />
+      <h1 className="text-center gradient-text">AI Video Editor</h1>
 
-      <VideoSearchForm onFetchChunks={handleFetchChunks} loading={loading}/>
-      
+      <VideoSearchForm onFetchChunks={handleFetchChunks} loading={loading} />
+
       {error && <div className="alert alert-danger my-3">{error}</div>}
-      {loading && <div>Loading...</div>}
+      {loading && <div className="loading-spinner">Loading...</div>}
 
       {chunks.length > 0 && (
-        <div className="card my-4 p-3">
+        <div className="card my-4 p-3 animated-section">
           <h3>Step 2: Search in Transcript</h3>
-          <p>Now that we've fetched transcript chunks, enter a query to find relevant parts:</p>
+          <p>Enter a query to find relevant parts:</p>
           <div className="input-group mb-3">
             <input
               type="text"
               className="form-control"
-              placeholder="e.g. 'why social media is harmful'"
+              placeholder="e.g. 'social media impact'"
               onChange={(e) => setSearchQuery(e.target.value)}
               value={searchQuery}
             />
@@ -151,14 +154,14 @@ function App() {
       )}
 
       {snippets.length > 0 && (
-        <div className="card my-4 p-3">
-          <h3>Top Snippets</h3> 
+        <div className="card my-4 p-3 fade-in">
+          <h3>Top Snippets</h3>
           <button
             className="btn btn-secondary mt-3"
             onClick={handleRefineOrder}
             disabled={loading}
           >
-            Refine/Reorder with LLM
+            Refine/Reorder Snippets
           </button>
 
           <SnippetEditor
@@ -172,7 +175,7 @@ function App() {
       {videoPath && (
         <div className="card p-3 my-4">
           <h4>Video Created!</h4>
-          <p>Download or watch your highlight video:</p>
+          <p>Download your video:</p>
           <a
             href={`http://localhost:5001/api/download-video/${videoPath.split('/').pop()}`}
             className="btn btn-success"
