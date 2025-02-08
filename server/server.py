@@ -3,38 +3,28 @@ import os
 import re
 import math
 import json
-import traceback
+import tempfile
+from openai import OpenAI
 import yt_dlp
-
-# --------------------------------------------
-# 1) Use the recommended OpenAI import & usage
-# --------------------------------------------
-import openai
-
-# Set your API key properly:
-# Option A: Hard-code your key for testing (NOT RECOMMENDED for production)
-#openai.api_key = "sk-proj-..."  # Replace with your actual key
-
-# Option B (better): use an environment variable named OPENAI_API_KEY
-openai.api_key = os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+import traceback
 
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 # For transcripts
-from youtube_transcript_api import (
-    YouTubeTranscriptApi,
-    TranscriptsDisabled,
-    NoTranscriptFound,
-    VideoUnavailable,
-)
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 
+import ssl
+
+# Global hack: disable certificate checks for *all* HTTPS requests
+ssl._create_default_https_context = ssl._create_unverified_context
 # For video editing
-# ---------------------------------------------------------
-# 2) Import VideoFileClip & concatenate_videoclips from the
-#    *editor* submodule, not from moviepy top-level.
-# ---------------------------------------------------------
 from moviepy import VideoFileClip, concatenate_videoclips
+
+# Install these libraries if you haven't:
+# pip install flask flask-cors youtube-transcript-api pytube moviepy openai
+
 ###############################################################################
 # 1) FLASK SETUP
 ###############################################################################
@@ -42,6 +32,9 @@ from moviepy import VideoFileClip, concatenate_videoclips
 app = Flask(__name__)
 CORS(app)  # Allow cross-origin from React dev server
 
+  # Or set your key here
+
+# You might prefer to store final videos somewhere else
 OUTPUT_DIR = "output_videos"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -53,6 +46,9 @@ def extract_video_id(youtube_url: str) -> str:
     """
     Attempt to extract the video ID from a typical YouTube URL.
     """
+    # Patterns: https://www.youtube.com/watch?v=VIDEOID
+    #           https://youtu.be/VIDEOID
+    #           https://youtube.com/shorts/VIDEOID
     short_link_match = re.match(r".*youtu\.be/([^?&]+)", youtube_url)
     if short_link_match:
         return short_link_match.group(1)
@@ -88,7 +84,7 @@ def fetch_full_transcript(video_id: str):
 def chunk_transcript(transcript, max_chunk_size=200):
     """
     Break the transcript into smaller pieces if needed (to handle large context).
-    max_chunk_size = number of words per chunk approx.
+    max_chunk_size = number of words (or tokens) per chunk approx.
     Returns a list of 'chunks'; each chunk is {text, start, end}
     """
     chunks = []
@@ -106,12 +102,14 @@ def chunk_transcript(transcript, max_chunk_size=200):
 
         # If adding this segment exceeds max_chunk_size, finalize the current chunk
         if word_count + len(words) > max_chunk_size and current_chunk_text:
+            # close out the chunk
             chunk_text = " ".join(current_chunk_text)
             chunks.append({
                 "text": chunk_text,
                 "start": current_chunk_start,
                 "end": current_chunk_end
             })
+            # start a new chunk
             current_chunk_text = []
             word_count = 0
             current_chunk_start = seg['start']
@@ -120,7 +118,7 @@ def chunk_transcript(transcript, max_chunk_size=200):
         word_count += len(words)
         current_chunk_end = seg['start'] + seg['duration']
 
-    # Add the last chunk
+    # Add last chunk
     if current_chunk_text:
         chunk_text = " ".join(current_chunk_text)
         chunks.append({
@@ -133,14 +131,11 @@ def chunk_transcript(transcript, max_chunk_size=200):
 
 def get_openai_embedding(text):
     """
-    Get embedding from OpenAI. 
-    Newer openai>=1.0.0 usage requires input as a list if using openai.Embedding.
+    Get embedding from OpenAI. Using text-embedding-ada-002 by default.
     """
-    response = openai.Embedding.create(
-        input=[text],  # must be a LIST
-        model="text-embedding-ada-002"
-    )
-    return response["data"][0]["embedding"]
+    response = client.embeddings.create(input=text,
+    model="text-embedding-ada-002")
+    return response.data[0].embedding
 
 def cosine_similarity(vec_a, vec_b):
     if len(vec_a) != len(vec_b):
@@ -154,25 +149,31 @@ def cosine_similarity(vec_a, vec_b):
 
 def download_video(video_id, output_path):
     """
-    Download a YouTube video using yt-dlp
+    Downloads a YouTube video using yt-dlp
+    :param video_id: YouTube video ID
+    :param output_path: Where to save the .mp4 file
     """
     url = f"https://www.youtube.com/watch?v={video_id}"
     
+    # The 'outtmpl' option sets the target filename (including extension).
     ydl_opts = {
-        'outtmpl': output_path,  # e.g. "output_videos/video_id.mp4"
-        'format': 'mp4/best'
+        'outtmpl': output_path,  # e.g. "path/to/video.mp4"
+        'format': 'mp4/best'     # pick the best available MP4 format
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
 def refine_snippets_order(snippets, user_query):
     """
-    Use an LLM to reorder the snippet text into a cohesive story.
+    Use an LLM to refine or reorder the snippet text into a cohesive story.
     We'll simply feed the snippet texts + original order to GPT and ask for
     a re-ordered list of snippet indexes and a short reason.
+
+    Note: This is a basic demonstration. You could also ask for merges, rewrites, etc.
     """
-    prompt_text = f"User query: '{user_query}'\n"
-    prompt_text += "We have the following snippet texts:\n"
+    prompt_text = "User query: '{}'\n".format(user_query)
+    prompt_text += "We have the following snippet texts (in the order we found them):\n"
     for i, s in enumerate(snippets):
         snippet_text = s['text']
         prompt_text += f"({i}): {snippet_text}\n"
@@ -182,22 +183,24 @@ def refine_snippets_order(snippets, user_query):
     )
 
     try:
-        completion = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are an assistant that returns JSON only."},
-                {"role": "user", "content": prompt_text}
-            ],
-            temperature=0.3
-        )
-        raw_response = completion.choices[0].message['content']
+        completion = client.chat.completions.create(model="gpt-3.5-turbo",
+        messages=[{"role": "system", "content": "You are an assistant that returns JSON only."},
+                  {"role": "user", "content": prompt_text}],
+        temperature=0.3)
+        raw_response = completion.choices[0].message.content
 
+        # Attempt to parse JSON
+        # Expected format example:
+        # {
+        #   "order": [2, 0, 1],
+        #   "explanation": "Explanation text"
+        # }
         data = json.loads(raw_response)
         new_order = data.get("order", list(range(len(snippets))))
         return new_order
     except:
         traceback.print_exc()
-        # If something goes wrong, just return original order
+        # If something goes wrong, just return in original order
         return list(range(len(snippets)))
 
 ###############################################################################
@@ -206,6 +209,11 @@ def refine_snippets_order(snippets, user_query):
 
 @app.route("/api/transcript-chunks", methods=["POST"])
 def route_transcript_chunks():
+    """
+    1) Receives JSON with { "youtubeUrl": "...", "maxChunkSize": 200 }
+    2) Fetches transcripts, chunks them, returns chunk data to frontend
+       for further processing.
+    """
     try:
         data = request.json
         youtube_url = data.get("youtubeUrl")
@@ -218,8 +226,11 @@ def route_transcript_chunks():
         if not video_id:
             return jsonify({"error": "Invalid YouTube URL"}), 400
 
-        transcript = fetch_full_transcript(video_id)  # may raise exception
+        # Fetch transcript
+        transcript = fetch_full_transcript(video_id)  # might raise exception
+        # Chunk transcript
         chunks = chunk_transcript(transcript, max_chunk_size)
+
         return jsonify({"chunks": chunks})
 
     except Exception as e:
@@ -227,6 +238,11 @@ def route_transcript_chunks():
 
 @app.route("/api/search-snippets", methods=["POST"])
 def route_search_snippets():
+    """
+    1) Receives JSON: { "chunks": [...], "query": "something", "topK": 5 }
+    2) Embeds each chunk and compares to user query embedding
+    3) Returns topK chunk metadata
+    """
     try:
         data = request.json
         chunks = data["chunks"]
@@ -236,7 +252,7 @@ def route_search_snippets():
         # 1) Embed user query
         query_embedding = get_openai_embedding(user_query)
 
-        # 2) Embed each chunk & compute similarity
+        # 2) Embed each chunk
         scored_chunks = []
         for i, c in enumerate(chunks):
             c_embedding = get_openai_embedding(c["text"])
@@ -245,9 +261,10 @@ def route_search_snippets():
             c["index"] = i
             scored_chunks.append(c)
 
-        # 3) Sort by similarity & pick top K
+        # 3) Sort by similarity
         scored_chunks.sort(key=lambda x: x["similarity"], reverse=True)
         top_results = scored_chunks[:top_k]
+
         return jsonify({"results": top_results})
     except Exception as e:
         traceback.print_exc()
@@ -255,6 +272,11 @@ def route_search_snippets():
 
 @app.route("/api/refine-snippets", methods=["POST"])
 def route_refine_snippets():
+    """
+    1) Receives JSON: { "snippets": [...], "query": "..." }
+    2) Asks LLM to reorder them into a cohesive story
+    3) Returns the new order
+    """
     try:
         data = request.json
         snippets = data["snippets"]
@@ -269,10 +291,21 @@ def route_refine_snippets():
 
 @app.route("/api/create-video", methods=["POST"])
 def route_create_video():
+    """
+    1) Receives JSON: {
+          "youtubeUrl": "...",
+          "snippets": [
+            { "start":..., "end":..., "text":"...", "shiftStart":..., "shiftEnd":... },
+            ...
+          ]
+       }
+    2) Downloads the video, splices out each snippet (with optional shift),
+       concatenates them, returns the path to the final video.
+    """
     try:
         data = request.json
         youtube_url = data["youtubeUrl"]
-        snippet_list = data["snippets"]
+        snippet_list = data["snippets"]  # Each snippet includes 'start', 'end', etc.
 
         if not youtube_url:
             return jsonify({"error": "No YouTube URL provided"}), 400
@@ -281,12 +314,11 @@ def route_create_video():
         if not video_id:
             return jsonify({"error": "Invalid YouTube URL"}), 400
 
-        # Download the original video if not already downloaded
+        # Download the video
         temp_video_path = os.path.join(OUTPUT_DIR, f"{video_id}.mp4")
         if not os.path.isfile(temp_video_path):
             download_video(video_id, temp_video_path)
 
-        # Load with MoviePy's VideoFileClip
         source_clip = VideoFileClip(temp_video_path)
         subclips = []
 
@@ -294,14 +326,13 @@ def route_create_video():
             start = float(snip["start"]) + float(snip.get("shiftStart", 0))
             end = float(snip["end"]) + float(snip.get("shiftEnd", 0))
 
-            # Ensure times are within the video duration
+            # Clamp the times within the video length
             start = max(0, start)
             end = min(source_clip.duration, end)
 
             if end > start:
-                # MoviePy's subclip() is available only on a valid VideoFileClip
-                snippet_clip = source_clip.subclipped(start, end)
-                subclips.append(snippet_clip)
+                subclip = source_clip.subclipped(start, end)
+                subclips.append(subclip)
 
         if not subclips:
             source_clip.close()
