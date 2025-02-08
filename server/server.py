@@ -15,10 +15,10 @@ from flask_cors import CORS
 # For transcripts
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 
-import ssl
+#import ssl
 
 # Global hack: disable certificate checks for *all* HTTPS requests
-ssl._create_default_https_context = ssl._create_unverified_context
+#ssl._create_default_https_context = ssl._create_unverified_context
 # For video editing
 from moviepy import VideoFileClip, concatenate_videoclips
 
