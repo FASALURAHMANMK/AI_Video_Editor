@@ -42,27 +42,15 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 2) HELPER FUNCTIONS
 ###############################################################################
 
-def extract_video_id(youtube_url: str) -> str:
+def extract_video_id(youtube_url):
     """
-    Attempt to extract the video ID from a typical YouTube URL.
+    Extracts the video id from a YouTube URL.
+    Adjust this regex if you need to support more URL formats.
     """
-    # Patterns: https://www.youtube.com/watch?v=VIDEOID
-    #           https://youtu.be/VIDEOID
-    #           https://youtube.com/shorts/VIDEOID
-    short_link_match = re.match(r".*youtu\.be/([^?&]+)", youtube_url)
-    if short_link_match:
-        return short_link_match.group(1)
+    regex = r'(?:\?v=|\/embed\/|\.be\/)([a-zA-Z0-9_-]{11})'
+    match = re.search(regex, youtube_url)
+    return match.group(1) if match else None
 
-    watch_match = re.match(r".*v=([^&]+)", youtube_url)
-    if watch_match:
-        return watch_match.group(1)
-
-    shorts_match = re.match(r".*youtube\.com/shorts/([^?&]+)", youtube_url)
-    if shorts_match:
-        return shorts_match.group(1)
-
-    # If unable to parse:
-    return None
 
 def fetch_full_transcript(video_id: str):
     """
@@ -83,16 +71,16 @@ def fetch_full_transcript(video_id: str):
 
 def chunk_transcript(transcript, max_chunk_size=200):
     """
-    Break the transcript into smaller pieces if needed (to handle large context).
-    max_chunk_size = number of words (or tokens) per chunk approx.
-    Returns a list of 'chunks'; each chunk is {text, start, end}
+    Break the transcript into smaller pieces if needed.
+    max_chunk_size = approximate number of words per chunk.
+    Returns a list of chunks; each chunk is a dict with {text, start, end}.
     """
     chunks = []
     current_chunk_text = []
     current_chunk_start = None
     current_chunk_end = None
-
     word_count = 0
+
     for seg in transcript:
         segment_text = seg['text']
         words = segment_text.split()
@@ -100,16 +88,15 @@ def chunk_transcript(transcript, max_chunk_size=200):
         if current_chunk_start is None:
             current_chunk_start = seg['start']
 
-        # If adding this segment exceeds max_chunk_size, finalize the current chunk
+        # If adding this segment would exceed the chunk size, finalize the current chunk.
         if word_count + len(words) > max_chunk_size and current_chunk_text:
-            # close out the chunk
             chunk_text = " ".join(current_chunk_text)
             chunks.append({
                 "text": chunk_text,
                 "start": current_chunk_start,
                 "end": current_chunk_end
             })
-            # start a new chunk
+            # Start a new chunk
             current_chunk_text = []
             word_count = 0
             current_chunk_start = seg['start']
@@ -118,7 +105,7 @@ def chunk_transcript(transcript, max_chunk_size=200):
         word_count += len(words)
         current_chunk_end = seg['start'] + seg['duration']
 
-    # Add last chunk
+    # Add the last chunk if it exists.
     if current_chunk_text:
         chunk_text = " ".join(current_chunk_text)
         chunks.append({
@@ -210,29 +197,53 @@ def refine_snippets_order(snippets, user_query):
 @app.route("/api/transcript-chunks", methods=["POST"])
 def route_transcript_chunks():
     """
-    1) Receives JSON with { "youtubeUrl": "...", "maxChunkSize": 200 }
-    2) Fetches transcripts, chunks them, returns chunk data to frontend
-       for further processing.
+    Receives JSON input with either:
+      - { "youtubeUrl": "https://www.youtube.com/watch?v=..." }
+      or
+      - { "youtubeUrls": ["https://www.youtube.com/watch?v=...", "https://www.youtube.com/watch?v=..."],
+          "maxChunkSize": 200 }
+    
+    For each provided YouTube URL, this endpoint:
+      1. Extracts the video ID.
+      2. Fetches the full transcript.
+      3. Breaks the transcript into chunks.
+      4. Optionally tags each chunk with the video URL and video ID.
+    
+    Finally, all transcript chunks from all videos are aggregated and returned.
     """
     try:
         data = request.json
-        youtube_url = data.get("youtubeUrl")
         max_chunk_size = data.get("maxChunkSize", 200)
 
-        if not youtube_url:
-            return jsonify({"error": "No YouTube URL provided"}), 400
+        # Check for an array of URLs, otherwise fall back to a single URL.
+        youtube_urls = data.get("youtubeUrls")
+        if youtube_urls:
+            if not isinstance(youtube_urls, list):
+                return jsonify({"error": "youtubeUrls must be an array"}), 400
+        else:
+            youtube_url = data.get("youtubeUrl")
+            if not youtube_url:
+                return jsonify({"error": "No YouTube URL provided"}), 400
+            youtube_urls = [youtube_url]
 
-        video_id = extract_video_id(youtube_url)
-        if not video_id:
-            return jsonify({"error": "Invalid YouTube URL"}), 400
+        aggregated_chunks = []
+        for youtube_url in youtube_urls:
+            video_id = extract_video_id(youtube_url)
+            if not video_id:
+                return jsonify({"error": f"Invalid YouTube URL: {youtube_url}"}), 400
 
-        # Fetch transcript
-        transcript = fetch_full_transcript(video_id)  # might raise exception
-        # Chunk transcript
-        chunks = chunk_transcript(transcript, max_chunk_size)
+            # Fetch transcript for the video.
+            transcript = fetch_full_transcript(video_id)
+            # Chunk the transcript.
+            chunks = chunk_transcript(transcript, max_chunk_size)
+            # Optionally tag each chunk with video info.
+            for chunk in chunks:
+                chunk['youtubeUrl'] = youtube_url
+                chunk['videoId'] = video_id
 
-        return jsonify({"chunks": chunks})
+            aggregated_chunks.extend(chunks)
 
+        return jsonify({"chunks": aggregated_chunks})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
