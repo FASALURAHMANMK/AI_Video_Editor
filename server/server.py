@@ -15,15 +15,9 @@ from flask_cors import CORS
 # For transcripts
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 
-#import ssl
-
-# Global hack: disable certificate checks for *all* HTTPS requests
-#ssl._create_default_https_context = ssl._create_unverified_context
 # For video editing
 from moviepy import VideoFileClip, concatenate_videoclips
 
-# Install these libraries if you haven't:
-# pip install flask flask-cors youtube-transcript-api pytube moviepy openai
 
 ###############################################################################
 # 1) FLASK SETUP
@@ -32,7 +26,6 @@ from moviepy import VideoFileClip, concatenate_videoclips
 app = Flask(__name__)
 CORS(app)  # Allow cross-origin from React dev server
 
-  # Or set your key here
 
 # You might prefer to store final videos somewhere else
 OUTPUT_DIR = "output_videos"
@@ -144,8 +137,8 @@ def download_video(video_id, output_path):
     
     # The 'outtmpl' option sets the target filename (including extension).
     ydl_opts = {
-        'outtmpl': output_path,  # e.g. "path/to/video.mp4"
-        'format': 'mp4/best'     # pick the best available MP4 format
+        'outtmpl': output_path,  
+        'format': 'mp4/best'     
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -176,12 +169,6 @@ def refine_snippets_order(snippets, user_query):
         temperature=0.3)
         raw_response = completion.choices[0].message.content
 
-        # Attempt to parse JSON
-        # Expected format example:
-        # {
-        #   "order": [2, 0, 1],
-        #   "explanation": "Explanation text"
-        # }
         data = json.loads(raw_response)
         new_order = data.get("order", list(range(len(snippets))))
         return new_order
@@ -196,21 +183,6 @@ def refine_snippets_order(snippets, user_query):
 
 @app.route("/api/transcript-chunks", methods=["POST"])
 def route_transcript_chunks():
-    """
-    Receives JSON input with either:
-      - { "youtubeUrl": "https://www.youtube.com/watch?v=..." }
-      or
-      - { "youtubeUrls": ["https://www.youtube.com/watch?v=...", "https://www.youtube.com/watch?v=..."],
-          "maxChunkSize": 200 }
-    
-    For each provided YouTube URL, this endpoint:
-      1. Extracts the video ID.
-      2. Fetches the full transcript.
-      3. Breaks the transcript into chunks.
-      4. Optionally tags each chunk with the video URL and video ID.
-    
-    Finally, all transcript chunks from all videos are aggregated and returned.
-    """
     try:
         data = request.json
         max_chunk_size = data.get("maxChunkSize", 200)
@@ -249,11 +221,6 @@ def route_transcript_chunks():
 
 @app.route("/api/search-snippets", methods=["POST"])
 def route_search_snippets():
-    """
-    1) Receives JSON: { "chunks": [...], "query": "something", "topK": 5 }
-    2) Embeds each chunk and compares to user query embedding
-    3) Returns topK chunk metadata
-    """
     try:
         data = request.json
         chunks = data["chunks"]
@@ -283,11 +250,6 @@ def route_search_snippets():
 
 @app.route("/api/refine-snippets", methods=["POST"])
 def route_refine_snippets():
-    """
-    1) Receives JSON: { "snippets": [...], "query": "..." }
-    2) Asks LLM to reorder them into a cohesive story
-    3) Returns the new order
-    """
     try:
         data = request.json
         snippets = data["snippets"]
@@ -302,17 +264,6 @@ def route_refine_snippets():
 
 @app.route("/api/create-video", methods=["POST"])
 def route_create_video():
-    """
-    1) Receives JSON: {
-          "youtubeUrl": "...",
-          "snippets": [
-            { "start":..., "end":..., "text":"...", "shiftStart":..., "shiftEnd":... },
-            ...
-          ]
-       }
-    2) Downloads the video, splices out each snippet (with optional shift),
-       concatenates them, returns the path to the final video.
-    """
     try:
         data = request.json
         youtube_url = data["youtubeUrl"]
