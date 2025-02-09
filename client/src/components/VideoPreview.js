@@ -4,7 +4,7 @@ const VideoPreview = ({ videoPath, downloadButtonRef }) => {
   const videoUrl = `http://localhost:5001/api/download-video/${videoPath.split('/').pop()}`;
   return (
     <div className="card p-3 my-4">
-      <h3>Step 5: Video Preview</h3>
+      <h3>Video Preview</h3>
       <div className="text-center">
         <video
           className="video-player"

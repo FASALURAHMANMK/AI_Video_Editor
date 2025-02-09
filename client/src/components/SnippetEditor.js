@@ -56,13 +56,15 @@ function SnippetEditor({ snippets, onCreateVideo, loading }) {
           </div>
         ))}
       </div>
+      <div className='center_button'>
       <button
         className="btn btn-primary mt-3"
         onClick={handleCreate}
         disabled={loading}
       >
-        Create Highlight Video
+        Create Video
       </button>
+      </div>
     </div>
   );
 }

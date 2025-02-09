@@ -55,7 +55,8 @@ function VideoSearchForm({ onFetchChunks, loading }) {
 
   return (
     <div className="card p-3">
-      <h3>Step 1: Paste a YouTube Link</h3>
+      <h3>Paste a YouTube Link</h3>
+      <br/>
       <form onSubmit={handleAddVideo}>
         <div className="input-group">
           <input
@@ -93,7 +94,7 @@ function VideoSearchForm({ onFetchChunks, loading }) {
               <button
                 type="button"
                 className="btn-close position-absolute"
-                style={{ top: '5px', right: '5px' }}
+                style={{ top: '5px', right: '5px'}}
                 aria-label="Remove"
                 onClick={() => handleRemoveVideo(index)}
               ></button>
@@ -103,6 +104,8 @@ function VideoSearchForm({ onFetchChunks, loading }) {
       )}
 
       {/* The Fetch Transcript button is now rendered below the thumbnails */}
+      <br/>
+      <div className='center_button'>
       <button
         className="btn btn-primary mt-3"
         type="button"
@@ -111,6 +114,7 @@ function VideoSearchForm({ onFetchChunks, loading }) {
       >
         Fetch Transcript{videos.length > 1 ? 's' : ''}
       </button>
+      </div>
     </div>
   );
 }

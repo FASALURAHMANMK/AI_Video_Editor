@@ -170,7 +170,7 @@ def refine_snippets_order(snippets, user_query):
     )
 
     try:
-        completion = client.chat.completions.create(model="gpt-3.5-turbo",
+        completion = client.chat.completions.create(model="gpt-4",
         messages=[{"role": "system", "content": "You are an assistant that returns JSON only."},
                   {"role": "user", "content": prompt_text}],
         temperature=0.3)

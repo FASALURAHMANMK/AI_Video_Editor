@@ -3,7 +3,7 @@ import React from 'react';
 const SearchTranscript = ({ searchQuery, onQueryChange, onSearch, loading, searchButtonRef }) => {
   return (
     <div className="card my-4 p-3">
-      <h3>Step 2: Search in Transcript</h3>
+      <h3>Search in Transcript</h3>
       <p>Enter a query to find relevant parts:</p>
       <div className="input-group mb-3">
         <input

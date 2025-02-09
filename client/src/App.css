@@ -38,7 +38,6 @@
 /* Example gradient text styling */
 .gradient-text {
   background: linear-gradient(to right, #007bff, #6610f2);
-  -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -123,6 +122,12 @@ body {
 .btn-primary {
   background: linear-gradient(45deg, #667eea, #764ba2);
   border: none;
+  width: 200px;
+  justify-content: center;
+}
+.center_button{
+  display: flex;
+  justify-content: center;
 }
 
 .btn-success {
@@ -132,4 +137,7 @@ body {
 
 .video-player {
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+.btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
 }
